@@ -115,7 +115,7 @@ def load_model_and_config(filename, arg_overrides: Optional[Dict[str, Any]] = No
     elif model_type == "hubert":
         task = tasks.setup_task(cfg.task)
         task.load_state_dict(state["task_state"])
-        model_cfg = merge_with_parent(HubertConfig(), model_cfg)
+        model_cfg = merge_with_parent(HubertConfig(), model_cfg) # HubertConfig is the default hubert config in this project
         # Update needed due to a bug in latest version of fairseq
         with open_dict(model_cfg):
             model_cfg.required_seq_len_multiple = 1

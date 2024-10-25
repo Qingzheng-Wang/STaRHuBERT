@@ -246,7 +246,7 @@ class TransformerEncoder(nn.Module):
                 padding_mask, self.required_seq_len_multiple, dim=-1, value=True
             )
 
-        # B x T x C -> T x B x C
+        # B x T x C -> T x B x C, because pytorch require B is not first
         x = x.transpose(0, 1)
         tr_layer_results = x
         

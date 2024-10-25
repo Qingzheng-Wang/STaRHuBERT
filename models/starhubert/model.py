@@ -168,12 +168,12 @@ class CustomStudentModel(BaseFairseqModel):
 
         # Must be turned off for using cnn feature extractor
         # assert cfg.enable_log_mel == False
-        feature_enc_layers = eval(cfg.conv_feature_layers)
+        feature_enc_layers = eval(cfg.conv_feature_layers) # eval will implement string-format python expresstions 
         self.embed = feature_enc_layers[-1][0] # final embedding dimension of feature extractor
         self.feature_extractor = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,
             dropout=0.0,
-            mode=cfg.extractor_mode,
+            mode=cfg.extractor_mode, # default group norm, option layer norm
             conv_bias=cfg.conv_bias,
             ) 
 
@@ -248,7 +248,7 @@ class CustomStudentModel(BaseFairseqModel):
             if self.feature_grad_mult != 1.0:
                 features = GradMultiply.apply(features, self.feature_grad_mult)
         else:
-            with torch.no_grad():
+            with torch.no_grad(): # Conv feature extractor without gradient computation
                 features = self.feature_extractor(source)
 
         features = features.transpose(1, 2)
