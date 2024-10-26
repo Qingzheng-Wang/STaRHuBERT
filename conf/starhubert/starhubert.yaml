@@ -1,22 +1,24 @@
 teacher:
-  teacher_model: './hubert_base_ls960.pt'
+  teacher_model: ./hubert_base_ls960.pt
 
 train:
-  base_dir: './'
+  base_dir: ./
   output_dir: 'starhubert_base_ls960_100h'
   checkpoint: null
   num_epochs: 100
   gpus: 2
-  batch_size: 2
+  batch_size: 32
   accumulate_grad_batches: 12
   monitor_losses: true
   ##### TODO: Add these options in `train.py`
-  fsp_type: both # feature space projection?
-  fsp_axis: channel
-  zeroth_input: pre_trf
-  fsp_loss_type: mse
+  fsp_type: both # feature space projection, [layer, intra, both]
+  fsp_axis: channel # 'channel' or 'time', if channel, project on channel axis
+  zeroth_input: pre_trf # if 'pre_trf', use pretrained feature extractor features
+  fsp_loss_type: mse # 'mse' or 'l1'
   #####
   specaug: false
+  use_fp16: false
+  use_apex: false
 
 distiller:
   # Extractor
@@ -43,10 +45,10 @@ distiller:
   layer_grad_scale: false
 
   # Conformer
-  depthwise_conv_kernel_size: 31
-  attn_type: ''
-  pos_enc_type: abs
-  fp16: true
+  # depthwise_conv_kernel_size: 31
+  # attn_type: ''
+  # pos_enc_type: abs
+  # fp16: true
 
   # Dropout
   dropout: 0.1
@@ -63,11 +65,11 @@ distiller:
   init_encoder_layers: 0
 
   # Time reduction layer
-  enable_tr_layer: false
-  tr_conv1d_kernel: 2
-  tr_layer_index: 0
-  tr_reduce_factor: 2
-  tr_layer_type: conv1d
+  # enable_tr_layer: false
+  # tr_conv1d_kernel: 2
+  # tr_layer_index: 0
+  # tr_reduce_factor: 2
+  # tr_layer_type: conv1d
 
   # Other
   checkpoint_activations: false
@@ -88,12 +90,8 @@ optimizer:
 data:
   bucketing_path: ./data/len_for_bucket
   libri_root: '/home/ubuntu/data/LibriSpeech'
-  train_set:
-  - train-clean-100
-  - train-clean-360
-  - train-other-500
-  test_set:
-  - test-clean
+  train_set: ['train-clean-100']
+  test_set: ['test-clean']
 
 specaug:
   adaptive: false

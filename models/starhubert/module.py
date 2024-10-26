@@ -248,7 +248,7 @@ class TransformerEncoder(nn.Module):
 
         # B x T x C -> T x B x C, because pytorch require B is not first
         x = x.transpose(0, 1)
-        tr_layer_results = x
+        tr_layer_results = x # tr_layer_results is the input of the first transformer layer
         
         x = F.dropout(x, p=self.dropout, training=self.training)
         
@@ -373,7 +373,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = self.self_attn_layer_norm(x)
 
             x, attn = self.self_attn(
-                query=x,
+                query=x, # [T, B, C]
                 key=x,
                 value=x,
                 key_padding_mask=self_attn_padding_mask,
@@ -420,4 +420,4 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = residual + x
             x = self.final_layer_norm(x)
 
-        return x, (attn, layer_result)
+        return x, (attn, layer_result) # each item in layer_results is (x (transformer layer's final output), (attention_map, ffn_layer_result (the ffn output before adding residual)))

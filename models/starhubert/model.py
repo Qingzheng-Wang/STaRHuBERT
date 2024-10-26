@@ -304,7 +304,7 @@ class CustomStudentModel(BaseFairseqModel):
         return {
             "x": x, 
             "post_cnn": features_to_distill, 
-            "pre_trf": tr_layer_results,
+            "pre_trf": tr_layer_results, # the input of the first transformer layer (different with feature extractor out put, because there are positional coding and mask)
             "layer_results": layer_results,
             "attn_layer_results": attn_layer_results,
             "padding_mask": padding_mask,

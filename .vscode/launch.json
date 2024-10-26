@@ -8,10 +8,13 @@
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",
-            "program": "/home/ubuntu/ARMHuBERT/train.py",
+            "program": "/home/ubuntu/ARMHuBERT/train_starhubert.py",
             "console": "integratedTerminal",
-            "args": ["-c", "/home/ubuntu/ARMHuBERT/conf/armhubert/armhubert-s-100.yaml", 
-                    "-m", "armhubert"]
+            "args": [
+                    "-c", "/home/ubuntu/ARMHuBERT/conf/starhubert/starhubert.yaml", 
+                    "-m", "starhubert", 
+                    // "-t"
+                ]
         }
     ]
 }

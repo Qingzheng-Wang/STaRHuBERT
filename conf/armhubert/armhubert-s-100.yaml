@@ -16,7 +16,7 @@ train:
   batch_size: 6
   accumulate_grad_batches: 3
   use_fp16: True
-  use_apex: False 
+  use_apex 
   monitor_losses: True
   rec_loss_weight: 1.0
   rec_loss_type: mse
@@ -102,7 +102,7 @@ optimizer:
   
 data:
   bucketing_path: './data/len_for_bucket'
-  libri_root: '/db/LibriSpeech'
+  libri_root: '/home/ubuntu/data/LibriSpeech'
   train_set: ['train-clean-100']
   test_set: ['test-clean']
 

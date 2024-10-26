@@ -23,7 +23,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.strategies import DDPStrategy
-32
+
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
@@ -44,13 +44,6 @@ class W2V2Distil(LightningModule):
             self.teacher_model, teacher_config, self.task_agnostic = load_model_and_config(teacher_model, arg_overrides=teacher_cfg)
         freeze_model(self.teacher_model)
 
-        if self.train_cfg['mask_prob_schedule']:
-            mask_prob_schedule = eval(self.train_cfg['mask_prob_schedule'])
-            mask_prob_start, mask_prob_end = mask_prob_schedule[0], mask_prob_schedule[1]
-            self.mask_prob_schedule = list(np.linspace(mask_prob_start, mask_prob_end, num=self.train_cfg['num_epochs']+1))
-            self.teacher_model.model.mask_prob = self.mask_prob_schedule.pop(0)
-            print("Teacher model mask_prob set to {:.4f}!".format(self.teacher_model.model.mask_prob))
-
         # Make student config independent of teacher
         self.distiller_cfg = self.yaml_cfg['distiller']
         init_student_config, init_student_model = init_model(self.yaml_cfg['model'])
@@ -66,29 +59,15 @@ class W2V2Distil(LightningModule):
             teacher_model=self.teacher_model
         )
 
-        # copy the mask tokens from the teacher
-        # self.student_model.mask_emb.data = self.teacher_model.model.mask_emb.data
-        if self.distiller_cfg['freeze_student_mask']:
-            self.student_model.mask_emb.requires_grad = False
-
-        self.rec_loss_weight = self.train_cfg['rec_loss_weight']
-        self.rec_loss_type = self.train_cfg['rec_loss_type']
-        self.random_layer_weight = self.train_cfg['random_layer_weight']
-
-        if self.train_cfg['delete_projections']:
-            self.student_model._disable_projection_heads()
+        self.fsp_type = self.train_cfg['fsp_type'] # 'layer', 'intra', ''both
+        self.fsp_axis = self.train_cfg['fsp_axis'] # 'channel' or 'time', if channel, project on channel axis
+        self.zeroth_input = self.train_cfg['zeroth_input'] # if 'pre_trf', use pretrained feature extractor features
+        self.fsp_loss_type = self.train_cfg['fsp_loss_type'] # 'mse' or 'l1'
 
         if self.train_cfg['specaug']:
             from utils.specaug import SpecAug
             specaug = SpecAug(**self.yaml_cfg['specaug'])
             self.student_model.add_specaug(specaug)
-
-        if self.train_cfg['distil_random_layer'] > 0:
-            self.num_encoders = self.distiller_cfg['encoder_layers']
-            self.all_enc = range(self.num_encoders-1)
-            self.rand_l = sorted(random.sample(self.all_enc, self.train_cfg['distil_random_layer']))
-        else:
-            assert self.train_cfg['random_layer_weight'] == 0
 
         self.batch_size = self.train_cfg['batch_size']
         self.num_gpus = self.train_cfg['gpus']
@@ -125,45 +104,7 @@ class W2V2Distil(LightningModule):
         reload(logging)
 
     def forward(self, x, padding_mask=None):
-        # Seems like lightning had been using the teacher model as training mode the whole time
-        self.teacher_model.eval()
-        if self.distiller_cfg['update_teacher_mask']:
-            self.teacher_model.model.mask_emb.data = self.student_model.mask_emb.data
-        
-        m_teacher_results = self.teacher_model.extract_features(
-                            source=x.clone().contiguous(), 
-                            padding_mask=padding_mask,
-                            mask=True,
-                            )
-        # -> RETURNS: {
-        #     "x": (B x T x D) (encoder output),
-        #     "layer_results": [x, (attn, lr)] x #layers,
-        #     "features": [features]
-        #     "mask_indices": [B x T] (bool)
-        # }
-
-        unm_teacher_results = self.teacher_model.extract_features(
-                              source=x.clone().contiguous(),
-                              padding_mask=padding_mask,
-                              mask=False,
-                              )
-
-        student_results = self.student_model(
-            source=x.clone().contiguous(), 
-            padding_mask=padding_mask,
-            mask_indices=m_teacher_results['mask_indices'],
-        )
-        # -> RETURNS: {
-        #     "x": x,
-        #     "padding_mask": padding_mask,
-        #     "layer_results": layer_results,
-        #     "tr_layer_results": tr_layer_results,
-        #     "projections": projections
-        # }
-
-        return student_results, unm_teacher_results, m_teacher_results 
-
-    def forward_without_mask(self, x, padding_mask=None):
+        # TODO: adapt model input and return to StarHuBERT!!!
         # Seems like lightning had been using the teacher model as training mode the whole time
         self.teacher_model.eval()
 
@@ -174,187 +115,115 @@ class W2V2Distil(LightningModule):
         )
         # -> RETURNS: {
         #     "x": (B x T x D) (encoder output),
-        #     "layer_results": [x, (attn, lr)] x #layers,
+        #     "layer_results": [x, (attn, lr)] x #layers, 
         #     "features": [features]
         # }
 
         student_results = self.student_model(
             source=x, 
             padding_mask=padding_mask,
-            mask_indices=None,
+            layer=None, # layer is to break at specific transformer layer and out put that layer results
         )
         # -> RETURNS: {
-        #     "x": x,
+        #     "x": x, 
+        #     "post_cnn": features_to_distill, 
+        #     "pre_trf": tr_layer_results, # the input of the first transformer layer (different with feature extractor out put, because there are positional coding and mask)
+        #     "layer_results": layer_results, # the output of each transformer layer
+        #     "attn_layer_results": attn_layer_results, # attention maps of each layer
         #     "padding_mask": padding_mask,
-        #     "features": features after post projector,
-        #     "layer_results": layer_results,
-        #     "tr_layer_results": tr_layer_results,
-        #     "projections": projections
         # }
 
         return student_results, teacher_results
 
     def training_step(self, batch, batch_idx):
-        student_results, unm_teacher_results, m_teacher_results = self(**batch)
+        student_results, teacher_results = self(**batch)
         
-        loss, losses = self.calculate_loss(student_results, unm_teacher_results, m_teacher_results)
+        loss, losses = self.calculate_loss(student_results, teacher_results)
 
         if self.train_cfg['monitor_losses']:
             for k, v in losses.items():
                 self.log(k, v.item(), prog_bar=True)
-            # mask_diff = F.mse_loss(self.teacher_model.model.mask_emb, self.student_model.mask_emb.detach(), reduction='mean')
-            # self.log('mask_diff', mask_diff, prog_bar=True)
 
         return loss
 
     def training_epoch_end(self, training_step_outputs):
-        if self.train_cfg['distil_random_layer'] > 0:
-            self.rand_l = sorted(random.sample(self.all_enc, self.train_cfg['distil_random_layer']))
-            # TODO: reset prog bar metrics
-            # self.trainer._logger_connector.reset_metrics()
-        if self.train_cfg['mask_prob_schedule']:
-            try: 
-                self.teacher_model.model.mask_prob = self.mask_prob_schedule.pop(0)
-                if self.global_rank == 0:
-                    print("Teacher model mask_prob set to {:.4f}!".format(self.teacher_model.model.mask_prob))
-            except:
-                pass
+        pass
     
     def validation_step(self, batch, batch_idx):
-        student_results, teacher_results = self.forward_without_mask(**batch)
-        loss = self.calculate_loss_without_mask(student_results, teacher_results)
-        self.log("v_loss", loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        student_results, teacher_results = self(**batch)
+        total_loss, losses = self.calculate_loss(student_results, teacher_results)
+        self.log("val_total_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("val_layer_loss", losses["layer_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("val_intra_loss", losses["intra_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
 
-        return {"v_loss": loss}
+        return {"v_loss": total_loss}
     
     def test_step(self, batch, batch_idx):
-        student_results, teacher_results = self.forward_without_mask(**batch)
-        loss = self.calculate_loss_without_mask(student_results, teacher_results)
-        self.log("test_loss", loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        student_results, teacher_results = self(**batch)
+        total_loss, losses = self.calculate_loss(student_results, teacher_results)
+        self.log("test_total_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("test_layer_loss", losses["layer_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("test_intra_loss", losses["intra_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
 
-        return {"test_loss": loss}
-
-
-    def calculate_loss(self, student_results, teacher_results, m_teacher_results, labels=None):
-        losses = {}
-        mask_indices = m_teacher_results['mask_indices'] # BxT
-
-        # Feature loss
-        if self.rec_loss_weight > 0:
-            if self.train_cfg['distil_random_layer'] > 0:
-                teacher_hiddens = [
-                teacher_results["layer_results"][l][0].transpose(0, 1)
-                    for l in self.rand_l
-                ]
-                teacher_hiddens.append(teacher_results["layer_results"][-1][0].transpose(0, 1))
-                teacher_hiddens = torch.stack(teacher_hiddens, dim=1) # BxNxTxD
-                
-                m_teacher_hiddens = [
-                m_teacher_results["layer_results"][l][0].transpose(0, 1)
-                    for l in self.rand_l
-                ]
-                m_teacher_hiddens.append(m_teacher_results["layer_results"][-1][0].transpose(0, 1))
-                m_teacher_hiddens = torch.stack(m_teacher_hiddens, dim=1) # BxNxTxD
-
-                student_hiddens = [
-                    student_results["projections"][l]
-                    for l in self.rand_l
-                ]
-                student_hiddens.append(student_results["projections"][-1])
-                pred = torch.stack(student_hiddens, dim=1)
-
-            else:
-                raise NotImplementedError
-
-            target = teacher_hiddens.narrow(2, 0, pred.shape[2])
-            m_target = m_teacher_hiddens.narrow(2, 0, pred.shape[2])
-            B, N, T, D = target.shape
-            mask_indices_ = mask_indices.unsqueeze(1).repeat_interleave(N-1, dim=1)
-
-            if self.rec_loss_type == 'l1':
-                mask_hint_loss = F.l1_loss(pred[:,:N-1][mask_indices_], target[:,:N-1][mask_indices_], reduction="none")
-                mask_rec_loss = F.l1_loss(pred[:,-1][mask_indices], target[:,-1][mask_indices], reduction="none")
-                unmask_hint_loss = F.l1_loss(pred[:,:N-1][~mask_indices_], m_target[:,:N-1][~mask_indices_], reduction="none")
-                unmask_rec_loss = F.l1_loss(pred[:,-1][~mask_indices], m_target[:,-1][~mask_indices], reduction="none")
-            elif self.rec_loss_type == 'mse':
-                mask_hint_loss = F.mse_loss(pred[:,:N-1][mask_indices_], target[:,:N-1][mask_indices_], reduction="none")
-                mask_rec_loss = F.mse_loss(pred[:,-1][mask_indices], target[:,-1][mask_indices], reduction="none")
-                unmask_hint_loss = F.mse_loss(pred[:,:N-1][~mask_indices_], m_target[:,:N-1][~mask_indices_], reduction="none")
-                unmask_rec_loss = F.mse_loss(pred[:,-1][~mask_indices], m_target[:,-1][~mask_indices], reduction="none")           
-            else:
-                raise NotImplementedError("rec_loss_type must be one of 'l1', 'mse'.")
-
-            if self.train_cfg['distil_random_layer'] > 0:
-                mask_hint_loss = mask_hint_loss.mean(-1).sum() / B / T
-                unmask_hint_loss = unmask_hint_loss.mean(-1).sum() / B / T
-                hint_loss = (mask_hint_loss + unmask_hint_loss) * self.random_layer_weight
-
-                mask_rec_loss = mask_rec_loss.mean(-1).sum() / B / T
-                unmask_rec_loss = unmask_rec_loss.mean(-1).sum() / B / T
-                rec_loss = (mask_rec_loss + unmask_rec_loss) * self.rec_loss_weight
-            else:
-                raise NotImplementedError
-
-        else:
-            rec_loss = 0
-            rec_layer_loss = 0
+        return {"test_loss": total_loss}
+    
+    def calculate_loss(self, student_results, teacher_results, labels=None):
+        losses = {"layer_loss": None, "intra_loss": None}
+        total_loss = 0.0
+        cal_layer = False
+        cal_intra = False
         
-        losses['mask_hint_loss'] = mask_hint_loss
-        losses['unmask_hint_loss'] = unmask_hint_loss
-        losses['mask_rec_loss'] = mask_rec_loss
-        losses['unmask_rec_loss'] = unmask_rec_loss
-        losses['hint_loss'] = hint_loss
-        losses['rec_loss'] = rec_loss
-            
-        total_loss = hint_loss + rec_loss
+        if self.fsp_type == 'layer':
+            cal_layer = True
+        elif self.fsp_type == 'intra':
+            cal_intra = True
+        elif self.fsp_type == 'both':
+            cal_layer = True
+            cal_intra = True
+        
+        loss_func = None
+        if self.fsp_loss_type == 'mse':
+            loss_func = F.mse_loss
+        elif self.fsp_loss_type == 'l1':
+            loss_func = F.l1_loss
+        
+        layer_results_teacher = teacher_results["features"]
+        t = [
+            teacher_results["layer_results"][l][0].transpose(0, 1) # [B, T, D]
+            for l in range(len(teacher_results["layer_results"]))
+        ]
+        layer_results_teacher.extend([
+            teacher_results["layer_results"][l][0].transpose(0, 1) # [B, T, D]
+            for l in range(len(teacher_results["layer_results"]))
+        ])
+        layer_results_teacher = torch.stack(layer_results_teacher, dim=1)
+
+        layer_results_student = [student_results["post_cnn"].transpose(0, 1)] # [B, T, D]
+        layer_results_student.extend([
+            student_results["layer_results"][l].transpose(0, 1)
+            for l in range(len(student_results["layer_results"]))
+        ]) # [L + 1, B, T, D]
+        layer_results_student = torch.stack(layer_results_student, dim=1) # [B, L + 1, T, D]
+
+        if cal_layer:
+            gram_teacher = torch.einsum('bltd,blfd->bltf', layer_results_teacher, layer_results_teacher)
+            gram_student = torch.einsum('bltd,blfd->bltf', layer_results_student, layer_results_student)
+            layer_loss = loss_func(gram_teacher, gram_student)
+            losses['layer_loss'] = layer_loss
+            total_loss += layer_loss
+
+        if cal_intra:
+            layer_results_teacher_0 = layer_results_teacher[:, :-1]
+            layer_results_teacher_1 = layer_results_teacher[:, 1:]
+            gram_teacher_intra = torch.einsum('bltd,blfd->bltf', layer_results_teacher_0, layer_results_teacher_1)
+            layer_results_student_0 = layer_results_student[:, :-1]
+            layer_results_student_1 = layer_results_student[:, 1:]
+            gram_student_intra = torch.einsum('bltd,blfd->bltf', layer_results_student_0, layer_results_student_1)
+            intra_loss = loss_func(gram_teacher_intra, gram_student_intra)
+            losses['intra_loss'] = intra_loss
+            total_loss += intra_loss
         
         return total_loss, losses
-
-    def calculate_loss_without_mask(self, student_results, teacher_results, labels=None):
-        losses = {}
-
-        # Feature loss
-        if self.rec_loss_weight > 0:
-            if self.train_cfg['distil_random_layer'] > 0:
-                teacher_hiddens = [
-                teacher_results["layer_results"][l][0].transpose(0, 1)
-                    for l in self.rand_l
-                ]
-                teacher_hiddens.append(teacher_results["layer_results"][-1][0].transpose(0, 1))
-                teacher_hiddens = torch.stack(teacher_hiddens, dim=1) # BxNxTxD
-                
-                student_hiddens = [
-                    student_results["projections"][l]
-                    for l in self.rand_l
-                ]
-                student_hiddens.append(student_results["projections"][-1])
-                pred = torch.stack(student_hiddens, dim=1)
-
-            else:
-                raise NotImplementedError
-
-            target = teacher_hiddens.narrow(2, 0, pred.shape[2])
-
-            if self.rec_loss_type == 'l1':
-                rec_loss = F.l1_loss(pred, target, reduction="none")
-            elif self.rec_loss_type == 'mse':
-                rec_loss = F.mse_loss(pred, target, reduction="none")
-            else:
-                raise NotImplementedError("rec_loss_type must be one of 'l1', 'mse'.")
-
-            if self.train_cfg['distil_random_layer'] > 0:
-                rec_loss[:, :-1] = rec_loss[:, :-1] * self.random_layer_weight  # Hint-based distillation
-                rec_loss[:, -1] = rec_loss[:, -1] * self.rec_loss_weight 
-                rec_layer_loss = rec_loss.mean((0, 2, 3))
-                rec_loss = rec_layer_loss.sum()
-            else:
-                with torch.no_grad():
-                    rec_layer_loss = rec_loss.mean((0, 2, 3)) 
-                rec_loss = rec_loss.mean()
-        else:
-            rec_loss = 0
-        
-        return rec_loss
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=eval(self.yaml_cfg['optimizer']['lr']))
