@@ -152,7 +152,7 @@ class W2V2Distil(LightningModule):
     def validation_step(self, batch, batch_idx):
         student_results, teacher_results = self(**batch)
         total_loss, losses = self.calculate_loss(student_results, teacher_results)
-        self.log("val_total_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("v_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
         self.log("val_layer_loss", losses["layer_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
         self.log("val_intra_loss", losses["intra_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
 
@@ -161,7 +161,7 @@ class W2V2Distil(LightningModule):
     def test_step(self, batch, batch_idx):
         student_results, teacher_results = self(**batch)
         total_loss, losses = self.calculate_loss(student_results, teacher_results)
-        self.log("test_total_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
+        self.log("test_loss", total_loss, on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
         self.log("test_layer_loss", losses["layer_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
         self.log("test_intra_loss", losses["intra_loss"], on_epoch=True, prog_bar=True, batch_size=self.batch_size, sync_dist=True)
 
@@ -186,12 +186,10 @@ class W2V2Distil(LightningModule):
             loss_func = F.mse_loss
         elif self.fsp_loss_type == 'l1':
             loss_func = F.l1_loss
+        elif self.fsp_loss_type == 'KL':
+            loss_func = torch.nn.KLDivLoss(reduction="batchmean")
         
         layer_results_teacher = teacher_results["features"]
-        t = [
-            teacher_results["layer_results"][l][0].transpose(0, 1) # [B, T, D]
-            for l in range(len(teacher_results["layer_results"]))
-        ]
         layer_results_teacher.extend([
             teacher_results["layer_results"][l][0].transpose(0, 1) # [B, T, D]
             for l in range(len(teacher_results["layer_results"]))
@@ -208,7 +206,14 @@ class W2V2Distil(LightningModule):
         if cal_layer:
             gram_teacher = torch.einsum('bltd,blfd->bltf', layer_results_teacher, layer_results_teacher)
             gram_student = torch.einsum('bltd,blfd->bltf', layer_results_student, layer_results_student)
-            layer_loss = loss_func(gram_teacher, gram_student)
+            if self.fsp_loss_type == "KL":
+                t = F.log_softmax(gram_student / torch.sqrt(torch.tensor(layer_results_student.shape[-1])), dim=-1)
+                layer_loss = loss_func(
+                    F.log_softmax(gram_student / torch.sqrt(torch.tensor(layer_results_student.shape[-1])), dim=-1),
+                    F.softmax(gram_teacher / torch.sqrt(torch.tensor(layer_results_teacher.shape[-1])), dim=-1)
+                )
+            else:
+                layer_loss = loss_func(gram_teacher, gram_student)
             losses['layer_loss'] = layer_loss
             total_loss += layer_loss
 
@@ -219,7 +224,13 @@ class W2V2Distil(LightningModule):
             layer_results_student_0 = layer_results_student[:, :-1]
             layer_results_student_1 = layer_results_student[:, 1:]
             gram_student_intra = torch.einsum('bltd,blfd->bltf', layer_results_student_0, layer_results_student_1)
-            intra_loss = loss_func(gram_teacher_intra, gram_student_intra)
+            if self.fsp_loss_type == "KL":
+                intra_loss = loss_func(
+                    F.log_softmax(gram_student_intra / torch.sqrt(torch.tensor(layer_results_student.shape[-1])), dim=-1), 
+                    F.softmax(gram_teacher_intra / torch.sqrt(torch.tensor(layer_results_teacher.shape[-1])), dim=-1)
+                )
+            else:
+                intra_loss = loss_func(gram_teacher_intra, gram_student_intra)
             losses['intra_loss'] = intra_loss
             total_loss += intra_loss
         

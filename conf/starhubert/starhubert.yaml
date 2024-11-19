@@ -3,18 +3,18 @@ teacher:
 
 train:
   base_dir: ./
-  output_dir: 'starhubert_base_ls960_100h'
-  checkpoint: null
-  num_epochs: 100
-  gpus: 2
-  batch_size: 32
+  output_dir: 'starhubert_base_ls960_100h_train_clean_100epc_mse'
+  checkpoint: ./results/pretrain/starhubert_base_ls960_100h_kl_div/last.ckpt
+  num_epochs: 200
+  gpus: 1
+  batch_size: 2
   accumulate_grad_batches: 12
   monitor_losses: true
   ##### TODO: Add these options in `train.py`
   fsp_type: both # feature space projection, [layer, intra, both]
   fsp_axis: channel # 'channel' or 'time', if channel, project on channel axis
   zeroth_input: pre_trf # if 'pre_trf', use pretrained feature extractor features
-  fsp_loss_type: mse # 'mse' or 'l1'
+  fsp_loss_type: mse # 'mse' or 'l1' or 'KL'
   #####
   specaug: false
   use_fp16: false
