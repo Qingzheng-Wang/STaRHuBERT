@@ -11,6 +11,7 @@ Group Members: Qingzheng Wang, Shun Li, Toris Ye, Fanxing Bu
 <p align="center">
 <img width="1400" alt="model" src="./assets/model_star.png">
 </p>
+
 - **<u>S</u>peech <u>T</u>empor<u>a</u>l <u>R</u>elation (STaR)**: Distill the knowledge by focusing on the pairwise **temporal relation** between two speech frames.
 - **Temporal Gram Matrix (TGM)**: Propose Temporal Gram Matrix which aggregates channel information at two time steps.
   - Layer-wise TGM: Distill the TGM for every Transformer layer
