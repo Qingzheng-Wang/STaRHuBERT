@@ -27,7 +27,7 @@ Group Members: Qingzheng Wang, Shun Li, Toris Ye, Fanxing Bu
 
 Below is the checkpoint for our reimplementation:
 
-- STaRHuBERT (22.3M): [ckpt](https://drive.google.com/file/d/1f2vFMQMgxdw03IL1Yv-H9zn_pXf3IvpI/view), [yaml](https://drive.google.com/file/d/1xilGjTNNouzqgRzqBSBF6LNo60vclXwW/view?usp=sharing) (CMU Only)
+- STaRHuBERT (22.3M): [ckpt](https://drive.google.com/file/d/1vCPosrb11LjNVJVV9IvO4o5vyze6MsMQ/view?usp=sharing), [yaml](https://drive.google.com/file/d/1xilGjTNNouzqgRzqBSBF6LNo60vclXwW/view?usp=sharing)
 
 ## Distillation
 
