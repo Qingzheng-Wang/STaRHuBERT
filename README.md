@@ -1,12 +1,12 @@
 
 
-# STaR HuBERT Reimplementation
+# STaRHuBERT Reimplementation
 
-**This repository contains a reimplementation of [STaR HuBERT]([2312.09040v1](https://arxiv.org/pdf/2312.09040v1)).**
+This repository contains a reimplementation of [STaRHuBERT]([2312.09040v1](https://arxiv.org/pdf/2312.09040v1)).
 
-**This project was developed as part of the CMU-11785 course.**
+*This project was developed as part of the CMU-11785 course.*
 
-Group Members: Qingzheng Wang, Shun Li, Toris Ye, Fanxing Bu
+Contributors: Qingzheng Wang, Shun Li, Toris Ye, Fanxing Bu
 
 <p align="center">
 <img width="1400" alt="model" src="./assets/model_star.png">
