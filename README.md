@@ -2,7 +2,7 @@
 
 # STaRHuBERT Reimplementation
 
-This repository contains a reimplementation of [STaRHuBERT]([2312.09040v1](https://arxiv.org/pdf/2312.09040v1)).
+This repository contains a reimplementation of [STaRHuBERT](https://arxiv.org/pdf/2312.09040v1).
 
 *This project was developed as part of the CMU-11785 course.*
 
