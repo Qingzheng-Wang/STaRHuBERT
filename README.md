@@ -14,12 +14,14 @@ Contributors: Qingzheng Wang, Shun Li, Toris Ye, Fanxing Bu
 <img width="1400" alt="model" src="./assets/model_star.png">
 </p>
 
+**Key Features**:
+
 - **<u>S</u>peech <u>T</u>empor<u>a</u>l <u>R</u>elation (STaR)**: Distill the knowledge by focusing on the pairwise **temporal relation** between two speech frames.
 - **Temporal Gram Matrix (TGM)**: Propose Temporal Gram Matrix which aggregates channel information at two time steps.
   - Layer-wise TGM: Distill the TGM for every Transformer layer
   - Intra-layer TGM: Modify the TGM as computing the temporal relation between the input and output of a single Transformer layer.
 
-**Reimplementation Results:**
+**Reimplementation Results**:
 
 <p align="center">
 <img width="1400" alt="model" src="./assets/reimplementation_results.png">
